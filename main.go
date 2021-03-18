@@ -3,15 +3,43 @@ package main
 import (
 	"fmt"
 	"github.com/Shopify/go-lua"
+	"github.com/docker/cli/cli/command"
+	cliconfig "github.com/docker/cli/cli/config"
+	cliflags "github.com/docker/cli/cli/flags"
 	"github.com/docker/compose-cli/cli/cmd/compose"
+	"github.com/docker/compose-cli/api/backend"
 	"github.com/docker/compose-cli/api/context/store"
+	"github.com/docker/compose-cli/api/errdefs"
+	apicontext "github.com/docker/compose-cli/api/context"
+	cliopts "github.com/docker/compose-cli/cli/options"
+	"github.com/docker/compose-cli/local"
 )
 
 func main() {
-	s, _ := store.New(".docker")
-	s.Create("", "local", "", nil)
+	var opts cliopts.GlobalOpts
 
+	configDir := ".docker"
+	currentContext := "default"
+
+	apicontext.WithCurrentContext(currentContext)
+
+	s, _ := store.New(configDir)
 	store.WithContextStore(s)
+
+	ctype := store.LocalContextType
+	cc, _ := s.Get(currentContext)
+
+	if cc != nil {
+		ctype = cc.Type()
+	}
+
+	service, err := getBackend(ctype, configDir, opts)
+
+	if err != nil {
+		panic(err)
+	}
+
+	backend.WithBackend(service)
 
 	l := lua.NewState()
 	lua.BaseOpen(l)
@@ -40,8 +68,40 @@ func main() {
 	lua.OpenLibraries(l)
 
 	if err := lua.DoFile(l, "test.lua"); err != nil {
-		panic(err)
+		//panic(err)
 	}
+}
+
+func getBackend(ctype string, configDir string, opts cliopts.GlobalOpts) (backend.Service, error) {
+	switch ctype {
+	case store.DefaultContextType, store.LocalContextType:
+		configFile, err := cliconfig.Load(configDir)
+		if err != nil {
+			return nil, err
+		}
+		options := cliflags.CommonOptions{
+			Context:  opts.Context,
+			Debug:    opts.Debug,
+			Hosts:    opts.Hosts,
+			LogLevel: opts.LogLevel,
+		}
+
+		if opts.TLSVerify {
+			options.TLS = opts.TLS
+			options.TLSVerify = opts.TLSVerify
+			options.TLSOptions = opts.TLSOptions
+		}
+		apiClient, err := command.NewAPIClientFromFlags(&options, configFile)
+		if err != nil {
+			return nil, err
+		}
+		return local.NewService(apiClient), nil
+	}
+	service, err := backend.Get(ctype)
+	if errdefs.IsNotFoundError(err) {
+		return service, nil
+	}
+	return service, err
 }
 
 func execCompose(args ...string) {
@@ -51,6 +111,7 @@ func execCompose(args ...string) {
 	err := cmd.Execute()
 
 	if err != nil {
-		fmt.Errorf("error executing compose: %w", err)
+		fmt.Println(err)
+//		panic(err)
 	}
 }
