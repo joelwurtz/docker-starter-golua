@@ -6,20 +6,6 @@ import (
 	"github.com/docker/compose-cli/cli/cmd/compose"
 )
 
-//func LComposeRequire2(l *lua.State) int {
-//	l.PushGoFunction(LCompose)
-//	l.CreateTable(0, 1)
-//	l.PushString("")
-//	l.PushValue(-2)
-//	l.SetMetaTable(-2)
-//	l.Pop(1)
-//	l.PushValue(-2)
-//	l.SetField(-2, "__index")
-//	l.Pop(1)
-//
-//	return 1
-//}
-
 func LComposeRequire(l *lua.State) int {
 	// Composer table
 	l.NewTable()
@@ -85,4 +71,11 @@ func CreateLComposeCommand(name string) func (l *lua.State) int {
 
 		return 0
 	}
+}
+
+func AddComposeLibrary(l *lua.State) {
+	lua.SubTable(l, lua.RegistryIndex, "_PRELOAD")
+	l.PushGoFunction(LComposeRequire)
+	l.SetField(-2, "compose")
+	l.Pop(1)
 }

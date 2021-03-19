@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/Shopify/go-lua"
 	"github.com/docker/cli/cli/command"
 	cliconfig "github.com/docker/cli/cli/config"
@@ -9,10 +8,26 @@ import (
 	"github.com/docker/compose-cli/api/backend"
 	"github.com/docker/compose-cli/api/context/store"
 	"github.com/docker/compose-cli/local"
+	"github.com/spf13/cobra"
 	"jolicode.com/docker-starter/functions"
 )
 
 func main() {
+	rootCmd := &cobra.Command{
+		Use:	"docker-starter",
+		Short:	"Docker start allow to manage project / boostrap",
+	}
+
+	functions.LState = loadLua()
+
+	for _, task := range functions.TaskRegistry {
+		rootCmd.AddCommand(task.Command)
+	}
+
+	rootCmd.Execute()
+}
+
+func loadLua() *lua.State {
 	configDir := ".docker"
 
 	s, _ := store.New(configDir)
@@ -29,36 +44,15 @@ func main() {
 	l := lua.NewState()
 
 	lua.OpenLibraries(l)
-	functions.LoadLibrary(l)
 
-	var name string
-	var commandDef interface{}
-	var commandCall interface{}
+	functions.AddComposeLibrary(l)
+	functions.AddTaskLibrary(l)
 
-	l.Register("create_task", func(l *lua.State) int {
-
-		name, _ = l.ToString(1)
-		commandDef = l.ToValue(2)
-		commandCall = l.ToValue(3)
-
-		return 0
-	})
-
-	if err := lua.DoFile(l, "test.lua"); err != nil {
+	if err := lua.DoFile(l, "bootstrap.lua"); err != nil {
 		panic(err)
 	}
 
-	fmt.Println(name)
-
-	if commandDef != nil {
-		l.PushLightUserData(commandDef)
-		l.Call(0, 0)
-	}
-
-	if commandCall != nil {
-		l.PushLightUserData(commandCall)
-		l.Call(0, 0)
-	}
+	return l
 }
 
 func createBackend(configDir string) (backend.Service, error) {
