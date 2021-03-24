@@ -1,62 +1,86 @@
 package functions
 
 import (
-	"github.com/Shopify/go-lua"
+	"github.com/yuin/gopher-lua"
 	"github.com/docker/compose-cli/api/context/store"
 	"github.com/docker/compose-cli/cli/cmd/compose"
 )
 
-func LComposeRequire(l *lua.State) int {
+var ComposeDefaultArgs []string
+
+func LoadCompose(l *lua.LState) int {
 	// Composer table
-	l.NewTable()
+	composerTable := l.CreateTable(0, 1)
+
+	// Push set default args command
+	l.SetField(composerTable, "set_default_args", l.NewFunction(SetDefaultArgs))
 
 	// Metatable
-	l.CreateTable(0, 1)
-	l.PushGoFunction(LComposeCommand)
-
-	// Push function to call
-	l.SetField(-2, "__index")
-
-	// Set current table as metatable
-	l.SetMetaTable(-2)
+	metatable := l.CreateTable(0, 1)
+	l.SetField(metatable, "__index", l.NewFunction(LComposeCommand))
+	l.SetMetatable(composerTable, metatable)
+	l.Push(composerTable)
 
 	return 1
 }
 
-func LComposeCommand(l *lua.State) int {
-	name, _ := l.ToString(2)
+func LComposeCommand(l *lua.LState) int {
+	name := l.ToString(2)
 
 	// Composer table
-	l.NewTable()
+	composerTable := l.NewTable()
 
 	// Metatable
-	l.CreateTable(0, 1)
-	l.PushGoFunction(CreateLComposeCommand(name))
-
-	// Push function to call
-	l.SetField(-2, "__call")
+	metatable := l.CreateTable(0, 1)
+	l.SetField(metatable, "__call", l.NewFunction(CreateLComposeCommand(name)))
+	l.SetMetatable(composerTable, metatable)
 
 	// Set current table as metatable
-	l.SetMetaTable(-2)
+	l.Push(composerTable)
 
 	return 1
 }
 
-func CreateLComposeCommand(name string) func (l *lua.State) int {
-	return func (l *lua.State) int {
-		args := []string{name}
+func SetDefaultArgs(l *lua.LState) int {
+	var args []string
+	ok := true
+	index := 1
+
+	for ok {
+		arg := l.ToString(index)
+
+		if arg != "" {
+			args = append(args, arg)
+		} else {
+			ok = false
+		}
+
+		index = index + 1
+	}
+
+	ComposeDefaultArgs = args
+
+	return 0
+}
+
+func CreateLComposeCommand(name string) func (l *lua.LState) int {
+	return func (l *lua.LState) int {
+		args := ComposeDefaultArgs
+		args = append(args, name)
+
 		ok := true
 		index := 2
 
 		for ok {
-			arg, argok := l.ToString(index)
+			arg := l.ToString(index)
 
-			if argok {
+			if arg != "" {
 				args = append(args, arg)
+			} else {
+				ok = false
 			}
 
 			index = index + 1
-			ok = argok
 		}
 
 		cmd := compose.Command(store.LocalContextType)
@@ -65,17 +89,13 @@ func CreateLComposeCommand(name string) func (l *lua.State) int {
 		err := cmd.Execute()
 
 		if err != nil {
-			l.PushString(err.Error())
-			l.Error()
+			l.Error(lua.LString(err.Error()), 0)
 		}
 
 		return 0
 	}
 }
 
-func AddComposeLibrary(l *lua.State) {
-	lua.SubTable(l, lua.RegistryIndex, "_PRELOAD")
-	l.PushGoFunction(LComposeRequire)
-	l.SetField(-2, "compose")
-	l.Pop(1)
+func PreloadCompose(l *lua.LState) {
+	l.PreloadModule("compose", LoadCompose)
 }

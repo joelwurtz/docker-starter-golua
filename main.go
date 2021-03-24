@@ -1,11 +1,12 @@
 package main
 
 import (
-	"github.com/Shopify/go-lua"
+	"github.com/yuin/gopher-lua"
 	"github.com/docker/cli/cli/command"
 	cliconfig "github.com/docker/cli/cli/config"
 	cliflags "github.com/docker/cli/cli/flags"
 	"github.com/docker/compose-cli/api/backend"
+	"github.com/docker/compose-cli/api/context"
 	"github.com/docker/compose-cli/api/context/store"
 	"github.com/docker/compose-cli/local"
 	"github.com/spf13/cobra"
@@ -27,11 +28,13 @@ func main() {
 	rootCmd.Execute()
 }
 
-func loadLua() *lua.State {
+func loadLua() *lua.LState {
 	configDir := ".docker"
 
 	s, _ := store.New(configDir)
 	store.WithContextStore(s)
+	context.WithCurrentContext(store.LocalContextType)
+	s.Create(store.LocalContextType, store.LocalContextType, "local context", nil)
 
 	service, err := createBackend(configDir)
 
@@ -43,12 +46,12 @@ func loadLua() *lua.State {
 
 	l := lua.NewState()
 
-	lua.OpenLibraries(l)
+	//lua.OpenLibraries(l)
 
-	functions.AddComposeLibrary(l)
-	functions.AddTaskLibrary(l)
+	functions.PreloadCompose(l)
+	functions.PreloadTask(l)
 
-	if err := lua.DoFile(l, "bootstrap.lua"); err != nil {
+	if err := l.DoFile("bootstrap.lua"); err != nil {
 		panic(err)
 	}
 

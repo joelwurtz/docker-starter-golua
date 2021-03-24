@@ -1,14 +1,14 @@
 package functions
 
 import (
-	"github.com/Shopify/go-lua"
+	"github.com/yuin/gopher-lua"
 	"github.com/spf13/cobra"
 )
 
 type Task struct {
 	Name              string
-	definitionClosure interface{}
-	callClosure       interface{}
+	definitionClosure *lua.LFunction
+	callClosure       *lua.LFunction
 	Command           *cobra.Command
 }
 
@@ -19,34 +19,13 @@ type Argument struct {
 }
 
 var TaskRegistry []*Task
-var LState       *lua.State
+var LState       *lua.LState
 var currentTask  *Task
 
-func CreateTask(l *lua.State) int {
-	if !l.IsString(1) {
-		l.PushString("first argument must be a string")
-		l.Error()
-
-		return 0
-	}
-
-	if !l.IsFunction(2) {
-		l.PushString("second argument must be a function")
-		l.Error()
-
-		return 0
-	}
-
-	if !l.IsFunction(3) {
-		l.PushString("third argument must be a function")
-		l.Error()
-
-		return 0
-	}
-
-	name, _ := l.ToString(1)
-	commandDef := l.ToValue(2)
-	commandCall := l.ToValue(3)
+func CreateTask(l *lua.LState) int {
+	name := l.CheckString(1)
+	commandDef := l.CheckFunction(2)
+	commandCall := l.CheckFunction(3)
 
 	task := &Task{
 		Name:              name,
@@ -58,7 +37,7 @@ func CreateTask(l *lua.State) int {
 	}
 
 	currentTask = task
-	l.PushValue(2)
+	l.Push(commandDef)
 	l.Call(0, 0)
 	currentTask = nil
 
@@ -68,68 +47,73 @@ func CreateTask(l *lua.State) int {
 	return 0
 }
 
-func SetShortDescription(l *lua.State) int {
+func SetShortDescription(l *lua.LState) int {
 	if currentTask == nil {
-		l.PushString("not in context of command definition")
-		l.Error()
+		l.Error(lua.LString("not in context of command definition"), 0)
 
 		return 0
 	}
 
-	if !l.IsString(1) {
-		l.PushString("first argument must be a string")
-		l.Error()
-
-		return 0
-	}
-
-	desc, _ := l.ToString(1)
+	desc := l.CheckString(1)
 	currentTask.Command.Short = desc
 
 	return 0
 }
 
-func SetLongDescription(l *lua.State) int {
+func SetLongDescription(l *lua.LState) int {
 	if currentTask == nil {
-		l.PushString("not in context of command definition")
-		l.Error()
+		l.Error(lua.LString("not in context of command definition"), 0)
 
 		return 0
 	}
 
-	if !l.IsString(1) {
-		l.PushString("wrong argument")
-		l.Error()
-
-		return 0
-	}
-
-	desc, _ := l.ToString(1)
+	desc := l.CheckString(1)
 	currentTask.Command.Long = desc
 
 	return 0
 }
 
-var taskLibrary = []lua.RegistryFunction{
-	{"create", CreateTask},
-	{"set_short_description", SetShortDescription},
-	{"set_long_description", SetLongDescription},
+func AddArgument(l *lua.LState) int {
+	if currentTask == nil {
+		l.Error(lua.LString("not in context of command definition"), 0)
+
+		return 0
+	}
+
+	return 0
 }
 
-func AddTaskLibrary(l *lua.State) {
-	lua.SubTable(l, lua.RegistryIndex, "_PRELOAD")
+func AddOption(l *lua.LState) int {
+	if currentTask == nil {
+		l.Error(lua.LString("not in context of command definition"), 0)
 
-	l.PushGoFunction(TaskLibraryOpen)
-	l.SetField(-2, "task")
-	l.Pop(1)
+		return 0
+	}
+
+	return 0
 }
 
-func TaskLibraryOpen(l *lua.State) int {
-	lua.NewLibrary(l, taskLibrary)
+var taskApi = map[string]lua.LGFunction{
+	"create": CreateTask,
+	"set_short_description": SetShortDescription,
+	"set_long_description": SetLongDescription,
+	"add_argument": AddArgument,
+	"add_option": AddOption,
+}
+
+func LoadTask(l *lua.LState) int {
+	api := l.NewTable()
+	l.SetFuncs(api, taskApi)
+	l.Push(api)
+
 	return 1
 }
 
-func (t *Task) Call(l *lua.State) {
+func PreloadTask(l *lua.LState) {
+	l.PreloadModule("task", LoadTask)
+}
+
+func (t *Task) Call(l *lua.LState) {
 
 }
 
@@ -140,7 +124,7 @@ func (t *Task) Run(cmd *cobra.Command, args []string) {
 
 	// Run command
 	if LState != nil {
-		LState.PushLightUserData(t.callClosure)
+		LState.Push(t.callClosure)
 
 		// @TODO Pass args to function
 		LState.Call(0, 0)
